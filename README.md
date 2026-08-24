@@ -1192,11 +1192,11 @@ A calibração de `risk_rank` apresentou melhora probabilística e leve melhora 
 3. [x] persistência da matriz completa em CSV
 4. [x] BestAlternativeMargin e SecondBestMargin
 5. [x] núcleo estrutural e zona marginal
-6. [ ] AlternativeGap
-7. [ ] RelativeStructuralMargin
-8. [ ] DeltaP14 na matriz de substituições
-9. [ ] perfil de rigidez / TicketRigidityIndex
-10. [ ] divergências risk_rank x structural_rank
+6. [x] AlternativeGap
+7. [x] RelativeStructuralMargin
+8. [x] DeltaP14 na matriz de substituições
+9. [x] perfil de rigidez / TicketRigidityIndex
+10. [x] divergências risk_rank x structural_rank
 ```
 
 ## Prioridade 2 — validar StructuralMargin fora da amostra
