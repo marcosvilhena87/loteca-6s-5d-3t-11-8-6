@@ -81,7 +81,7 @@ CoberturaD23  = p(top2) + p(top3) = 1 - p(top1)
 CoberturaT123 = 1
 ```
 
-A decisão é global. Não selecionar secos, duplos ou triplos apenas pelo `risk_rank`, entropia ou `1-p(top1)`.
+A decisão é global. Não selecionar secos, duplos ou triplos apenas por `risk_rank`, entropia ou `1-p(top1)`.
 
 ---
 
@@ -108,7 +108,7 @@ SecoTop2 = 5 - D12 - D23
 SecoTop3 = 3 - D13 - D23
 ```
 
-E:
+E obrigatoriamente:
 
 ```text
 SecoTop1 + SecoTop2 + SecoTop3 = 6
@@ -227,11 +227,11 @@ Brier por risk_rank
 
 Uma calibração pode melhorar LogLoss/Brier sem melhorar `13+`.
 
-Separar:
+Separar explicitamente no código:
 
 ```text
 risk_rank_probability_promoted
-risk_rank_decision_promoted
+risk_rank_ticket_promoted
 ```
 
 Critérios probabilísticos:
@@ -255,6 +255,8 @@ mean_hits
 ```
 
 A melhora probabilística é evidência auxiliar e não prova melhora do bilhete final.
+
+O ajuste probabilístico pode permanecer promovido mesmo quando `risk_rank_ticket_promoted = False`, caso ainda não exista ganho decisório fora da amostra.
 
 ---
 
@@ -290,6 +292,7 @@ gap13
 TripleGain
 GainPerExtraMark
 StructuralMargin
+RelativeStructuralMargin
 structural_rank
 ```
 
@@ -402,8 +405,9 @@ Cada alternativa deve:
 1. alterar a decisão candidata
 2. reconstruir globalmente o restante do bilhete
 3. manter 6S/5D/3T e 11/8/6
-4. recalcular P(>=13)
-5. recalcular P(>=12)
+4. recalcular P(14)
+5. recalcular P(>=13)
+6. recalcular P(>=12)
 ```
 
 Persistir a matriz completa em CSV:
@@ -414,6 +418,9 @@ JogoOriginal
 DecisaoOriginal
 JogoSubstituto
 DecisaoAlternativa
+P14_original
+P14_alternativo
+DeltaP14
 P13plus_original
 P13plus_alternativo
 DeltaP13plus
@@ -422,7 +429,7 @@ P12plus_alternativo
 DeltaP12plus
 ```
 
-O console pode mostrar apenas a melhor alternativa por decisão; o CSV deve manter todas as alternativas válidas.
+O console pode mostrar apenas as melhores alternativas por decisão; o CSV deve manter todas as alternativas válidas.
 
 ---
 
@@ -453,6 +460,19 @@ StructuralMargin < 0,075 pp       -> MARGINAL
 
 As faixas são diagnósticas e devem ser validadas historicamente.
 
+### Calibração futura das classes
+
+Comparar os cortes fixos com classes derivadas dos quantis históricos de `StructuralMargin`:
+
+```text
+P25
+P50
+P75
+P90
+```
+
+Somente substituir os cortes atuais se os limites empíricos mostrarem maior estabilidade e utilidade fora da amostra.
+
 ---
 
 # structural_rank
@@ -471,6 +491,7 @@ risk_rank
 structural_rank
 DecisaoAtual
 StructuralMargin
+RelativeStructuralMargin
 classe estrutural
 melhor alternativa válida
 ```
@@ -494,6 +515,14 @@ AlternativeGap pequeno -> várias alternativas estruturalmente semelhantes
 AlternativeGap grande  -> quase empate concentrado em uma alternativa específica
 ```
 
+Essa distinção permite separar:
+
+```text
+marginalidade difusa
+vs
+marginalidade pareada
+```
+
 ---
 
 # RelativeStructuralMargin
@@ -506,6 +535,8 @@ RelativeStructuralMargin
 ```
 
 Objetivo: medir o custo da troca em relação ao próprio nível de `P(>=13)` do bilhete.
+
+Reportar preferencialmente como percentual relativo e manter a margem absoluta em pontos percentuais.
 
 ---
 
@@ -524,9 +555,12 @@ Contar quantas soluções válidas existem dentro de perdas relativas de:
 Registrar:
 
 ```text
+faixa
 n_solucoes_na_faixa
-melhor distância de Hamming ao Champion
-amplitude de P13plus na faixa
+melhor_P13plus
+pior_P13plus
+amplitude_P13plus
+maior_distancia_Hamming
 ```
 
 Interpretação:
@@ -547,13 +581,63 @@ maximizar diversidade
 sujeito a P13plus >= limite de quase ótimo
 ```
 
-Não substitui o bilhete oficial.
+Não substitui o bilhete oficial. Serve para medir concentração do ótimo e diversidade disponível dentro da faixa quase ótima.
+
+---
+
+# TicketRigidityIndex
+
+Criar uma métrica global de rigidez do bilhete apenas para diagnóstico.
+
+Versão inicial simples:
+
+```text
+TicketRigidityIndex
+= média dos StructuralMargins dos 14 jogos
+```
+
+Também registrar:
+
+```text
+mediana
+mínimo
+máximo
+desvio-padrão
+n_MARGINAL
+n_MODERADA
+n_FORTE
+n_MUITO_FORTE
+```
+
+Interpretação:
+
+```text
+rigidez alta  -> poucas decisões facilmente substituíveis
+rigidez baixa -> muitos quase empates estruturais
+```
+
+Não usar `TicketRigidityIndex` como objetivo até existir validação histórica.
 
 ---
 
 # Validação histórica do StructuralMargin
 
-Registrar `StructuralMargin` e `structural_rank` em todos os concursos walk-forward.
+Registrar em todos os concursos walk-forward:
+
+```text
+Concurso
+Jogo
+Decisao
+risk_rank
+structural_rank
+StructuralMargin
+RelativeStructuralMargin
+SecondBestMargin
+AlternativeGap
+ClasseEstrutural
+ResultadoReal
+HitsFinal
+```
 
 Pesquisar:
 
@@ -562,6 +646,7 @@ Pesquisar:
 2. margem alta está associada a maior estabilidade temporal?
 3. decisões marginais concentram alterações de bilhete?
 4. decisões marginais concentram ganhos/perdas dos Challengers?
+5. classes estruturais mantêm significado entre janelas temporais?
 ```
 
 `StructuralMargin` é inicialmente uma métrica de explicabilidade. Só poderá virar sinal de decisão após evidência fora da amostra.
@@ -579,7 +664,15 @@ baixo risco / alta importância estrutural
 baixo risco / baixa importância estrutural
 ```
 
-Objetivo: entender quando risco probabilístico e valor estrutural convergem ou divergem.
+Gerar também um resumo automático de divergências extremas:
+
+```text
+maior risco com baixa importância estrutural
+menor risco com alta importância estrutural
+maior diferença absoluta entre risk_rank e structural_rank
+```
+
+Objetivo: mostrar por que “jogo difícil” não significa automaticamente “triplo”.
 
 ---
 
@@ -622,6 +715,32 @@ média/mediana de TripleMargin
 
 ---
 
+# Challengers de seleção de triplos
+
+Comparar o DP global com heurísticas simples:
+
+```text
+A = triplos escolhidos pelo DP
+B = três menores p(top1)
+C = três maiores entropias
+D = três maiores 1-p(top1)
+E = seleção aleatória válida repetida em múltiplas amostras
+```
+
+Comparar:
+
+```text
+13+
+12+
+mean_hits
+Net13Gain
+TripleCriticalRate
+```
+
+Objetivo: medir quanto do valor vem da existência dos três triplos e quanto vem da localização ótima escolhida pelo DP.
+
+---
+
 # Métricas específicas de D23
 
 Registrar:
@@ -646,22 +765,48 @@ RecoveryCritical
 = a escolha D23 foi necessária para manter o bilhete em 13+
 ```
 
+Consolidar:
+
+```text
+RecoverySuccessRate
+RecoveryCriticalRate
+Top1AbandonmentLossRate
+NetRecoveryGain
+```
+
 Objetivo: medir quando o caráter agressivo de D23 gera ganho líquido real.
 
 ---
 
-# Challengers de seleção de triplos
+# Zona marginal como espaço de pesquisa
 
-Comparar o DP global com heurísticas simples:
+Medir historicamente:
 
 ```text
-A = triplos escolhidos pelo DP
-B = três menores p(top1)
-C = três maiores entropias
-D = três maiores 1-p(top1)
+% das mudanças Champion/Challenger na zona marginal
+% dos ganhos de hits originados na zona marginal
+% das perdas originadas na zona marginal
+% das mudanças de faixa 13+ originadas na zona marginal
 ```
 
-O DP deve demonstrar ganho fora da amostra, principalmente em `13+` e `Net13Gain`.
+Se a maior parte das mudanças úteis ocorrer nas decisões marginais, testar Challengers restritos a essa região.
+
+---
+
+# Proteção experimental do núcleo estrutural
+
+Challenger de pesquisa:
+
+```text
+fixar decisões MUITO FORTE/FORTE
+permitir mudanças apenas nas MODERADAS/MARGINAIS
+```
+
+Comparar contra o otimizador totalmente livre.
+
+Objetivo: verificar se `StructuralMargin` permite reduzir o espaço de busca sem regressão de `13+`.
+
+Essa proteção nunca deve ser promovida sem validação walk-forward.
 
 ---
 
@@ -672,7 +817,8 @@ Comparar no mínimo:
 ```text
 A = probabilidades brutas
 B = + temperatura
-C = + temperatura + risk_rank
+C = + temperatura + risk_rank probabilístico
+D = + alteração decisória de risk_rank, quando candidata
 ```
 
 Relatório mínimo:
@@ -689,11 +835,13 @@ median_hits
 Net13Gain
 DecisionNetGain
 DecisionWinRate
-RecoveryRate
-DoubleWasteRate
+RecoverySuccessRate
+RecoveryCriticalRate
+Top1AbandonmentLossRate
 TripleRescueRate
 TripleWasteRate
 TripleCriticalRate
+TicketRigidityIndex
 ```
 
 O ganho estimado pelo próprio modelo em `P(>=13)` não prova ganho real.
@@ -732,6 +880,7 @@ Comparar:
 mean_hits
 Net13Gain
 robustez temporal
+StructuralCost
 ```
 
 Tratar cada distribuição como Challenger estrutural separado.
@@ -834,6 +983,8 @@ seco / duplo / triplo
 risk_rank
 structural_rank
 StructuralMargin
+RelativeStructuralMargin
+classe estrutural
 ```
 
 Objetivo: detectar padrões como:
@@ -933,16 +1084,43 @@ AlternativeGap
 ## Núcleo estrutural
 
 ```text
-Rank estrutural | Jogo | Decisão | StructuralMargin | Classe
+Rank estrutural | Jogo | Decisão | StructuralMargin | RelativeStructuralMargin | Classe
 ```
 
 ## Zona marginal
 
 ```text
-Jogo | Decisão | Melhor alternativa | StructuralMargin | DeltaP12plus
+Jogo | Decisão | Melhor alternativa | StructuralMargin | AlternativeGap | DeltaP12plus
 ```
 
-Isso permite identificar rapidamente quais decisões são rígidas e quais pertencem a uma região de quase empate.
+## Perfil de rigidez
+
+```text
+MUITO FORTE: n
+FORTE:       n
+MODERADA:    n
+MARGINAL:    n
+
+StructuralMargin média
+StructuralMargin mediana
+StructuralMargin mínima
+StructuralMargin máxima
+TicketRigidityIndex
+```
+
+---
+
+# Divergências risco x estrutura
+
+Imprimir os casos mais informativos:
+
+```text
+maior risco com menor importância estrutural
+menor risco com maior importância estrutural
+maior |risk_rank - structural_rank|
+```
+
+Essa seção deve explicar por que a alocação global pode divergir de uma ordenação simples por risco.
 
 ---
 
@@ -957,6 +1135,8 @@ Jogo X recebeu D23 porque possui alto risco de falha do Top1,
 a cobertura Top2+Top3 é competitiva e a melhor reconstrução
 estrutural alternativa reduz P13plus em Y pp.
 ```
+
+A explicação nunca deve substituir ou alterar o cálculo global.
 
 ---
 
@@ -1004,7 +1184,7 @@ A calibração de `risk_rank` apresentou melhora probabilística e leve melhora 
 
 # Roadmap priorizado
 
-## Prioridade 1 — consolidar auditoria estrutural
+## Prioridade 1 — completar a auditoria estrutural
 
 ```text
 1. [x] StructuralMargin
@@ -1014,16 +1194,20 @@ A calibração de `risk_rank` apresentou melhora probabilística e leve melhora 
 5. [x] núcleo estrutural e zona marginal
 6. [ ] AlternativeGap
 7. [ ] RelativeStructuralMargin
+8. [ ] DeltaP14 na matriz de substituições
+9. [ ] perfil de rigidez / TicketRigidityIndex
+10. [ ] divergências risk_rank x structural_rank
 ```
 
 ## Prioridade 2 — validar StructuralMargin fora da amostra
 
 ```text
 1. salvar StructuralMargin em todo walk-forward
-2. testar estabilidade temporal do structural_rank
-3. correlacionar risk_rank x structural_rank
+2. salvar RelativeStructuralMargin, SecondBestMargin e AlternativeGap
+3. testar estabilidade temporal do structural_rank
 4. verificar se decisões marginais concentram mudanças de Champion/Challenger
 5. verificar se margem alta prediz estabilidade estrutural
+6. validar ou recalibrar as classes por quantis históricos
 ```
 
 ## Prioridade 3 — medir o valor real de triplos e D23
@@ -1033,10 +1217,11 @@ A calibração de `risk_rank` apresentou melhora probabilística e leve melhora 
 2. TripleWasteRate
 3. TripleCriticalRate
 4. TripleMargin
-5. RecoveryCriticalRate
-6. Top1AbandonmentLoss
-7. NetRecoveryGain
-8. comparar DP vs heurísticas simples de seleção de triplos
+5. RecoverySuccessRate
+6. RecoveryCriticalRate
+7. Top1AbandonmentLossRate
+8. NetRecoveryGain
+9. comparar DP vs heurísticas simples e seleção aleatória válida de triplos
 ```
 
 ## Prioridade 4 — medir rigidez global do ótimo
@@ -1046,6 +1231,7 @@ A calibração de `risk_rank` apresentou melhora probabilística e leve melhora 
 2. bilhete quase ótimo de máxima distância de Hamming
 3. custo histórico das Soft Constraints
 4. medir regiões locais de quase empate
+5. testar proteção experimental do núcleo estrutural
 ```
 
 ## Prioridade 5 — validar estrutura e distribuição
@@ -1062,7 +1248,7 @@ A calibração de `risk_rank` apresentou melhora probabilística e leve melhora 
 ## Prioridade 6 — evolução do risk_rank
 
 ```text
-1. separar promoção probabilística da decisória no código
+1. separar risk_rank_probability_promoted de risk_rank_ticket_promoted no código
 2. shrinkage adaptativo
 3. Challenger Top1_fail
 4. Challenger Top2 vs Top3 condicionado a Top1_fail
