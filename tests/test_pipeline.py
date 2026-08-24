@@ -132,7 +132,17 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(audit)
         self.assertTrue(all(item["DeltaP13plus"] <= 1e-12 for item in audit))
         self.assertEqual({item["JogoOriginal"] for item in audit},
-                         {int(item["Jogo"]) for item in predictions if item["tipo"] != "seco"})
+                         {int(item["Jogo"]) for item in predictions})
+        self.assertTrue(all("DeltaP12plus" in item for item in audit))
+        self.assertTrue(any(
+            {item["DecisaoAtual"], item["Alternativa"]} == {"T123", "D12"}
+            for item in audit
+        ))
+        self.assertEqual(sorted(item["structural_rank"] for item in predictions), list(range(1, 15)))
+        for item in predictions:
+            self.assertIn("StructuralImportance", item)
+            self.assertIn("ConfidenceMargin", item)
+            self.assertIn("melhor_alternativa_valida", item)
 
     def test_independent_validator_rejects_a_tampered_ticket(self):
         rows = []
