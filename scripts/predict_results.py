@@ -97,13 +97,16 @@ def _selected_ranks(game: dict) -> tuple[int, ...]:
 
 
 def add_structural_telemetry(predictions: list[dict]) -> list[dict]:
-    """Add marginal importance, confidence and structural rank per game."""
+    """Add structural margins and their diagnostic classification per game."""
     audit = substitution_audit(predictions)
-    best_by_game = {
-        game: max((item for item in audit if item["JogoOriginal"] == game),
-                  key=lambda item: item["P13plus_alternativo"])
+    alternatives_by_game = {
+        game: sorted(
+            (item for item in audit if item["JogoOriginal"] == game),
+            key=lambda item: (-item["P13plus_alternativo"], item["JogoSubstituto"]),
+        )
         for game in {int(item["Jogo"]) for item in predictions}
     }
+    best_by_game = {game: alternatives[0] for game, alternatives in alternatives_by_game.items()}
     importance = {
         game: item["P13plus_original"] - item["P13plus_alternativo"]
         for game, item in best_by_game.items()
@@ -116,8 +119,11 @@ def add_structural_telemetry(predictions: list[dict]) -> list[dict]:
     for game in predictions:
         number = int(game["Jogo"])
         alternative = best_by_game[number]
-        game["StructuralImportance"] = importance[number]
-        game["ConfidenceMargin"] = importance[number]
+        second = alternatives_by_game[number][1] if len(alternatives_by_game[number]) > 1 else alternative
+        game["StructuralMargin"] = importance[number]
+        game["StructuralClass"] = structural_margin_class(importance[number])
+        game["BestAlternativeMargin"] = importance[number]
+        game["SecondBestMargin"] = alternative["P13plus_original"] - second["P13plus_alternativo"]
         game["structural_rank"] = ranks[number]
         game["melhor_alternativa_valida"] = (
             f"J{alternative['JogoSubstituto']}:{alternative['Alternativa']}"
@@ -125,6 +131,45 @@ def add_structural_telemetry(predictions: list[dict]) -> list[dict]:
         game["DeltaP13plus_alternativa"] = alternative["DeltaP13plus"]
         game["DeltaP12plus_alternativa"] = alternative["DeltaP12plus"]
     return predictions
+
+
+def structural_margin_class(margin: float) -> str:
+    """Classify an absolute P(13+) margin using README percentage-point bands."""
+    if margin < 0.00075:
+        return "MARGINAL"
+    if margin < 0.002:
+        return "MODERADA"
+    if margin < 0.004:
+        return "FORTE"
+    return "MUITO FORTE"
+
+
+def write_substitution_audit(predictions: list[dict], output_path: str | Path) -> Path:
+    """Persist the complete valid structural substitution matrix as CSV."""
+    rows = substitution_audit(predictions)
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    contest = predictions[0]["Concurso"] if predictions else ""
+    serialized = [{
+        "Concurso": contest,
+        "JogoOriginal": row["JogoOriginal"],
+        "DecisaoOriginal": row["DecisaoAtual"],
+        "JogoSubstituto": row["JogoSubstituto"],
+        "DecisaoAlternativa": row["Alternativa"],
+        "P13plus_original": row["P13plus_original"],
+        "P13plus_alternativo": row["P13plus_alternativo"],
+        "DeltaP13plus": row["DeltaP13plus"],
+        "P12plus_original": row["P12plus_original"],
+        "P12plus_alternativo": row["P12plus_alternativo"],
+        "DeltaP12plus": row["DeltaP12plus"],
+    } for row in rows]
+    if not serialized:
+        raise ValueError("A matriz de substituições estruturais está vazia")
+    with destination.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(serialized[0]), delimiter=";", lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(serialized)
+    return destination
 
 
 def _set_selected_ranks(game: dict, ranks: tuple[int, ...]) -> None:
@@ -328,7 +373,12 @@ def optimize(
     return output, best.success
 
 
-def predict(next_path: str | Path, model_path: str | Path, output_path: str | Path) -> tuple[list[dict], float]:
+def predict(
+    next_path: str | Path,
+    model_path: str | Path,
+    output_path: str | Path,
+    audit_path: str | Path | None = None,
+) -> tuple[list[dict], float]:
     model = json.loads(Path(model_path).read_text(encoding="utf-8"))
     predictions, success = optimize(
         read_loteca_csv(next_path), float(model["temperature"]), model.get("rank_lifts", [1.0, 1.0, 1.0]),
@@ -340,6 +390,10 @@ def predict(next_path: str | Path, model_path: str | Path, output_path: str | Pa
         writer = csv.DictWriter(stream, fieldnames=list(predictions[0]), delimiter=";", lineterminator="\n")
         writer.writeheader()
         writer.writerows(predictions)
+    write_substitution_audit(
+        predictions,
+        audit_path or destination.with_name(f"{destination.stem}_substitutions.csv"),
+    )
     return predictions, success
 
 
@@ -360,9 +414,9 @@ def print_telemetry(predictions: list[dict], success: float) -> None:
                         if game["tipo"] != "seco" else "")
         print(f"  {game['tipo']}: {game['palpite']} [{game['ranks_selecionados']}] "
               f"cobertura={game['probabilidade_coberta']:.4f}{double_audit}")
-        print(f"  structural_rank={game['structural_rank']} | importância/confiança="
-              f"{game['StructuralImportance']:.8%} | melhor alternativa: "
-              f"{game['melhor_alternativa_valida']}")
+        print(f"  structural_rank={game['structural_rank']} | StructuralMargin="
+              f"{game['StructuralMargin']:.8%} ({game['StructuralClass']}) | melhor alternativa: "
+              f"{game['melhor_alternativa_valida']} | SecondBestMargin={game['SecondBestMargin']:.8%}")
     dry = sum(game["tipo"] == "seco" for game in predictions)
     doubles = sum(game["tipo"] == "duplo" for game in predictions)
     triples = sum(game["tipo"] == "triplo" for game in predictions)
@@ -393,6 +447,23 @@ def print_telemetry(predictions: list[dict], success: float) -> None:
           f"perda relativa={predictions[0]['perda_relativa_soft']:.6%} | "
           f"tolerância={predictions[0]['tolerancia_relativa_soft']:.3%}")
     _print_substitution_audit(predictions)
+    _print_structural_summaries(predictions)
+
+
+def _print_structural_summaries(predictions: list[dict], limit: int = 5) -> None:
+    """Print compact views of the rigid core and near-tie zone."""
+    ordered = sorted(predictions, key=lambda game: game["structural_rank"])
+    print("\n=== NÚCLEO ESTRUTURAL ===")
+    print("Rank | Jogo | Decisão | StructuralMargin | Classe")
+    for game in ordered[:limit]:
+        print(f"{game['structural_rank']:>4} | {int(game['Jogo']):>4} | "
+              f"{game['tipo_estrutural']:>7} | {game['StructuralMargin']:.8%} | {game['StructuralClass']}")
+    print("\n=== ZONA MARGINAL ===")
+    print("Jogo | Decisão | Melhor alternativa | StructuralMargin | DeltaP12+")
+    for game in reversed(ordered[-limit:]):
+        print(f"{int(game['Jogo']):>4} | {game['tipo_estrutural']:>7} | "
+              f"{game['melhor_alternativa_valida']:>18} | {game['StructuralMargin']:.8%} | "
+              f"{game['DeltaP12plus_alternativa']:+.8%}")
 
 
 def _print_substitution_audit(predictions: list[dict]) -> None:

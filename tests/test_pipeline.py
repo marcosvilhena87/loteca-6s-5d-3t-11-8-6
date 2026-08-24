@@ -1,7 +1,10 @@
 import unittest
 
 from scripts.common import rank_results, rank_scale, top1_risk_scale
-from scripts.predict_results import hit_distribution, optimize, substitution_audit, validate_ticket
+from scripts.predict_results import (
+    hit_distribution, optimize, structural_margin_class, substitution_audit,
+    validate_ticket, write_substitution_audit,
+)
 from scripts.train_model import _decision_impact, _risk_rank_analysis, _tail_metrics, _validated_temperature
 
 
@@ -140,9 +143,38 @@ class PipelineTests(unittest.TestCase):
         ))
         self.assertEqual(sorted(item["structural_rank"] for item in predictions), list(range(1, 15)))
         for item in predictions:
-            self.assertIn("StructuralImportance", item)
-            self.assertIn("ConfidenceMargin", item)
+            self.assertIn("StructuralMargin", item)
+            self.assertIn("StructuralClass", item)
+            self.assertIn("BestAlternativeMargin", item)
+            self.assertIn("SecondBestMargin", item)
+            self.assertGreaterEqual(item["SecondBestMargin"], item["BestAlternativeMargin"] - 1e-15)
             self.assertIn("melhor_alternativa_valida", item)
+
+    def test_structural_margin_classes_use_percentage_point_bands(self):
+        self.assertEqual(structural_margin_class(-0.001), "MARGINAL")
+        self.assertEqual(structural_margin_class(0.00074), "MARGINAL")
+        self.assertEqual(structural_margin_class(0.00075), "MODERADA")
+        self.assertEqual(structural_margin_class(0.002), "FORTE")
+        self.assertEqual(structural_margin_class(0.004), "MUITO FORTE")
+
+    def test_complete_substitution_matrix_is_persisted(self):
+        import csv
+        import tempfile
+        from pathlib import Path
+
+        rows = [{
+            "Concurso": "9", "Jogo": str(game), "Mandante": f"TIME {game} A",
+            "Visitante": f"TIME {game} B", "p(1)": "0,50", "p(x)": "0,30", "p(2)": "0,20",
+        } for game in range(1, 15)]
+        predictions, _ = optimize(rows, 1.0)
+        expected = substitution_audit(predictions)
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = write_substitution_audit(predictions, Path(temporary) / "audit.csv")
+            with destination.open(encoding="utf-8", newline="") as stream:
+                persisted = list(csv.DictReader(stream, delimiter=";"))
+        self.assertEqual(len(persisted), len(expected))
+        self.assertTrue(all(row["Concurso"] == "9" for row in persisted))
+        self.assertEqual({int(row["JogoOriginal"]) for row in persisted}, set(range(1, 15)))
 
     def test_independent_validator_rejects_a_tampered_ticket(self):
         rows = []
