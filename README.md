@@ -375,16 +375,14 @@ Nunca corrigir silenciosamente um bilhete inválido.
 
 # Auditoria estrutural nativa 6S-5D-3T
 
-A antiga auditoria simples de “6º vs 7º candidato a duplo” pertence ao modelo 8S-6D-0T e não deve ser usada como auditoria principal.
-
-Fronteiras conceituais:
+A auditoria deve considerar explicitamente as fronteiras:
 
 ```text
 TRIPLO <-> DUPLO
 DUPLO  <-> SECO
 ```
 
-A auditoria principal deve ser global: qualquer promoção ou rebaixamento deve reconstruir uma solução válida 6S/5D/3T e 11/8/6.
+A auditoria principal é global: qualquer promoção ou rebaixamento deve reconstruir uma solução válida 6S/5D/3T e 11/8/6.
 
 ---
 
@@ -430,8 +428,6 @@ O console pode mostrar apenas a melhor alternativa por decisão; o CSV deve mant
 
 # StructuralMargin
 
-Usar uma única métrica principal para o custo estrutural de alterar uma decisão:
-
 ```text
 StructuralMargin_i
 = P13plus_original - melhor_P13plus_alternativo_valido
@@ -444,13 +440,9 @@ valor alto  -> decisão estruturalmente rígida/importante
 valor baixo -> decisão marginal/facilmente substituível
 ```
 
-Não chamar essa métrica de “confiança” estatística.
-
-Ela mede custo no espaço de soluções, não probabilidade de a decisão estar correta.
+Não chamar essa métrica de confiança estatística. Ela mede custo no espaço de soluções.
 
 ## Classificação qualitativa inicial
-
-Faixas apenas diagnósticas e sujeitas a validação histórica:
 
 ```text
 StructuralMargin < 0,075 pp       -> MARGINAL
@@ -459,13 +451,11 @@ StructuralMargin < 0,075 pp       -> MARGINAL
 >= 0,40 pp                         -> MUITO FORTE
 ```
 
-As faixas não devem modificar o bilhete sem validação walk-forward.
+As faixas são diagnósticas e devem ser validadas historicamente.
 
 ---
 
 # structural_rank
-
-Separar claramente:
 
 ```text
 risk_rank       = risco de falha do Top1
@@ -487,25 +477,35 @@ melhor alternativa válida
 
 ---
 
-# SecondBestMargin
+# SecondBestMargin e AlternativeGap
 
-Além da melhor alternativa, registrar a segunda melhor alternativa estrutural válida.
+Além da melhor alternativa, registrar a segunda melhor alternativa estrutural válida:
 
 ```text
 BestAlternativeMargin
 SecondBestMargin
+AlternativeGap = SecondBestMargin - StructuralMargin
 ```
 
-Objetivo: distinguir uma decisão genericamente frágil de uma decisão quase empatada com apenas uma alternativa específica.
-
-Exemplo conceitual:
+Interpretação:
 
 ```text
-melhor alternativa  = -0,05 pp
-segunda alternativa = -0,60 pp
+AlternativeGap pequeno -> várias alternativas estruturalmente semelhantes
+AlternativeGap grande  -> quase empate concentrado em uma alternativa específica
 ```
 
-Nesse caso existe uma quase degenerescência localizada, não uma fragilidade geral.
+---
+
+# RelativeStructuralMargin
+
+Além da margem absoluta, registrar:
+
+```text
+RelativeStructuralMargin
+= StructuralMargin / P13plus_original
+```
+
+Objetivo: medir o custo da troca em relação ao próprio nível de `P(>=13)` do bilhete.
 
 ---
 
@@ -521,21 +521,19 @@ Contar quantas soluções válidas existem dentro de perdas relativas de:
 1,00%
 ```
 
-em relação ao ótimo global.
+Registrar:
+
+```text
+n_solucoes_na_faixa
+melhor distância de Hamming ao Champion
+amplitude de P13plus na faixa
+```
 
 Interpretação:
 
 ```text
 muitas soluções quase ótimas -> região plana; Soft Constraints são baratas
 poucas soluções quase ótimas  -> ótimo rígido; alterações custam mais
-```
-
-Registrar também, quando possível:
-
-```text
-n_solucoes_na_faixa
-melhor distância de Hamming ao Champion
-amplitude de P13plus na faixa
 ```
 
 ---
@@ -549,7 +547,7 @@ maximizar diversidade
 sujeito a P13plus >= limite de quase ótimo
 ```
 
-Não substitui o bilhete oficial. Serve para medir concentração e estabilidade do ótimo.
+Não substitui o bilhete oficial.
 
 ---
 
@@ -572,7 +570,7 @@ Pesquisar:
 
 # Relação risk_rank x structural_rank
 
-Analisar quatro grupos:
+Analisar:
 
 ```text
 alto risco / alta importância estrutural
@@ -626,8 +624,6 @@ média/mediana de TripleMargin
 
 # Métricas específicas de D23
 
-D23 abandona Top1 e deve ser auditado separadamente.
-
 Registrar:
 
 ```text
@@ -637,7 +633,7 @@ Top1AbandonmentLoss
 NetRecoveryGain
 ```
 
-Definições conceituais:
+Definições:
 
 ```text
 RecoverySuccess
@@ -665,7 +661,7 @@ C = três maiores entropias
 D = três maiores 1-p(top1)
 ```
 
-O DP só deve ser considerado superior como estratégia se demonstrar ganho fora da amostra, principalmente em `13+` e `Net13Gain`.
+O DP deve demonstrar ganho fora da amostra, principalmente em `13+` e `Net13Gain`.
 
 ---
 
@@ -704,34 +700,6 @@ O ganho estimado pelo próprio modelo em `P(>=13)` não prova ganho real.
 
 ---
 
-# Comparação 8S-6D-0T vs 6S-5D-3T
-
-Executar comparação histórica direta com os mesmos concursos e probabilidades:
-
-```text
-Champion antigo = 8S-6D-0T / 10-5-5
-Challenger novo = 6S-5D-3T / 11-8-6
-```
-
-Métricas:
-
-```text
-14
-13+
-12+
-mean_hits
-Net13Gain
-```
-
-Objetivo:
-
-```text
-medir se as marcações extras e os três triplos
-se convertem em ganho real de 13+ fora da amostra
-```
-
----
-
 # StructuralCost da distribuição 11-8-6
 
 ```text
@@ -740,7 +708,7 @@ P13plus_11_8_6   = melhor P(>=13) impondo 11/8/6
 StructuralCost   = P13plus_relaxado - P13plus_11_8_6
 ```
 
-`StructuralCost` é diagnóstico e nunca autoriza relaxar Hard Constraints do Champion implantado.
+`StructuralCost` é diagnóstico e nunca autoriza relaxar as Hard Constraints do Champion implantado.
 
 ---
 
@@ -902,7 +870,7 @@ Não promover técnica cujo ganho dependa de poucos concursos isolados.
 
 ```text
 Champion   = método atualmente implantado
-Challenger = nova regra, modelo ou estrutura candidata
+Challenger = nova regra, modelo ou estrutura candidata dentro do projeto 6S-5D-3T / 11-8-6
 ```
 
 Promover somente quando:
@@ -951,28 +919,24 @@ DoubleGain / RecoveryGain / TripleGain
 GainPerExtraMark
 structural_rank
 StructuralMargin
+RelativeStructuralMargin
 classe estrutural
 melhor alternativa válida
 SecondBestMargin
+AlternativeGap
 ```
 
 ---
 
 # Resumo estrutural do bilhete
 
-Além da telemetria completa, imprimir dois resumos compactos.
-
 ## Núcleo estrutural
-
-Os jogos de maior `StructuralMargin`:
 
 ```text
 Rank estrutural | Jogo | Decisão | StructuralMargin | Classe
 ```
 
 ## Zona marginal
-
-Os jogos com menor `StructuralMargin`:
 
 ```text
 Jogo | Decisão | Melhor alternativa | StructuralMargin | DeltaP12plus
@@ -984,7 +948,7 @@ Isso permite identificar rapidamente quais decisões são rígidas e quais perte
 
 # Explicação automática por jogo
 
-Gerar justificativa auditável, sem substituir o cálculo global.
+Gerar justificativa auditável usando somente métricas calculadas.
 
 Exemplo:
 
@@ -993,8 +957,6 @@ Jogo X recebeu D23 porque possui alto risco de falha do Top1,
 a cobertura Top2+Top3 é competitiva e a melhor reconstrução
 estrutural alternativa reduz P13plus em Y pp.
 ```
-
-A explicação deve usar somente métricas efetivamente calculadas.
 
 ---
 
@@ -1017,7 +979,7 @@ GainPerExtraMark
 matriz de substituições estruturais
 structural_rank
 StructuralMargin classificado e SecondBestMargin
-persistência da matriz completa em `output/predictions_substitutions.csv`
+persistência da matriz completa em output/predictions_substitutions.csv
 resumos de núcleo estrutural e zona marginal
 calibração por temperatura
 calibração e auditoria por risk_rank
@@ -1042,14 +1004,16 @@ A calibração de `risk_rank` apresentou melhora probabilística e leve melhora 
 
 # Roadmap priorizado
 
-## Prioridade 1 — consolidar auditoria estrutural (concluída)
+## Prioridade 1 — consolidar auditoria estrutural
 
 ```text
-1. [x] renomear importância/confiança para StructuralMargin
-2. [x] classificar MARGINAL / MODERADA / FORTE / MUITO FORTE
-3. [x] persistir matriz completa de substituições em CSV
-4. [x] registrar BestAlternativeMargin e SecondBestMargin
-5. [x] imprimir núcleo estrutural e zona marginal
+1. [x] StructuralMargin
+2. [x] classificação MARGINAL / MODERADA / FORTE / MUITO FORTE
+3. [x] persistência da matriz completa em CSV
+4. [x] BestAlternativeMargin e SecondBestMargin
+5. [x] núcleo estrutural e zona marginal
+6. [ ] AlternativeGap
+7. [ ] RelativeStructuralMargin
 ```
 
 ## Prioridade 2 — validar StructuralMargin fora da amostra
@@ -1084,15 +1048,15 @@ A calibração de `risk_rank` apresentou melhora probabilística e leve melhora 
 4. medir regiões locais de quase empate
 ```
 
-## Prioridade 5 — provar o ganho da estrutura
+## Prioridade 5 — validar estrutura e distribuição
 
 ```text
-1. walk-forward 8S-6D-0T vs 6S-5D-3T
-2. bootstrap pareado para 13+
-3. IC95% de Net13Gain
-4. robustez em 50/100/200 concursos e histórico completo
-5. StructuralCost da distribuição 11-8-6
-6. pesquisa de distribuições alternativas
+1. bootstrap pareado para 13+ entre Champion e Challengers internos
+2. IC95% de Net13Gain
+3. robustez em 50/100/200 concursos e histórico completo
+4. StructuralCost da distribuição 11-8-6
+5. pesquisa de distribuições alternativas
+6. validação walk-forward das mudanças estruturais candidatas
 ```
 
 ## Prioridade 6 — evolução do risk_rank
@@ -1115,4 +1079,4 @@ O projeto procura construir **um único bilhete de 14 jogos**, com exatamente **
 P(acertos >= 13)
 ```
 
-Toda melhoria deve ser demonstrada fora da amostra, comparada contra um Champion e mantida sempre dentro das Hard Constraints.
+Toda melhoria deve ser demonstrada fora da amostra, comparada contra um Champion interno do próprio projeto e mantida sempre dentro das Hard Constraints.
