@@ -1,6 +1,6 @@
-# Loteca 8S-6D-0T — Estratégia 10-5-5
+# Loteca 6S-5D-3T — Estratégia 11-8-6
 
-Projeto para geração de **um único palpite final por concurso da Loteca**, usando o histórico e as informações do próximo concurso para maximizar prioritariamente:
+Projeto para geração de **um único palpite final por concurso da Loteca**, usando histórico, probabilidades estimadas e informações do próximo concurso para maximizar prioritariamente:
 
 ```text
 P(acertos >= 13)
@@ -14,13 +14,13 @@ Toda técnica deve respeitar integralmente as Hard Constraints. Probabilidades, 
 
 ```text
 14 jogos
-8 secos
-6 duplos
-0 triplos
-10 Top1
-5 Top2
-5 Top3
-20 marcações
+6 secos
+5 duplos
+3 triplos
+11 Top1
+8 Top2
+6 Top3
+25 marcações
 ```
 
 Em caso de empate de probabilidades, usar:
@@ -32,6 +32,161 @@ Em caso de empate de probabilidades, usar:
 Quando o **FLAMENGO/RJ** participar, sua vitória deve obrigatoriamente estar entre as marcações.
 
 Soft Constraints nunca podem relaxar Hard Constraints.
+
+---
+
+# Consistência estrutural
+
+A estrutura possui exatamente:
+
+```text
+6 secos  x 1 marcação =  6
+5 duplos x 2 marcações = 10
+3 triplos x 3 marcações = 9
+Total                  = 25 marcações
+```
+
+A distribuição por rank também deve fechar exatamente:
+
+```text
+11 Top1
+8 Top2
+6 Top3
+Total = 25 marcações
+```
+
+Nenhuma solução parcial ou final pode violar esses totais.
+
+---
+
+# Tipos de decisão por jogo
+
+Para cada partida, considerar sete possibilidades estruturais:
+
+```text
+S1   = Top1
+S2   = Top2
+S3   = Top3
+D12  = Top1 + Top2
+D13  = Top1 + Top3
+D23  = Top2 + Top3
+T123 = Top1 + Top2 + Top3
+```
+
+O triplo possui cobertura total:
+
+```text
+CoberturaT123 = 1.0
+```
+
+A decisão final é global: não escolher secos, duplos ou triplos isoladamente apenas por ranking de risco.
+
+---
+
+# Estrutura dos duplos e triplos
+
+Definir:
+
+```text
+D12 = quantidade de duplos Top1+Top2
+D13 = quantidade de duplos Top1+Top3
+D23 = quantidade de duplos Top2+Top3
+T123 = quantidade de triplos
+```
+
+Com:
+
+```text
+D12 + D13 + D23 = 5
+T123 = 3
+```
+
+Os secos por rank são determinados pelos totais globais:
+
+```text
+SecoTop1 = 11 - D12 - D13 - T123
+SecoTop2 =  8 - D12 - D23 - T123
+SecoTop3 =  6 - D13 - D23 - T123
+```
+
+Como `T123 = 3`:
+
+```text
+SecoTop1 = 8 - D12 - D13
+SecoTop2 = 5 - D12 - D23
+SecoTop3 = 3 - D13 - D23
+```
+
+Além disso:
+
+```text
+SecoTop1 + SecoTop2 + SecoTop3 = 6
+```
+
+Toda composição candidata deve satisfazer simultaneamente essas identidades.
+
+---
+
+# Cobertura das decisões
+
+```text
+CoberturaS1   = p(top1)
+CoberturaS2   = p(top2)
+CoberturaS3   = p(top3)
+CoberturaD12  = p(top1) + p(top2)
+CoberturaD13  = p(top1) + p(top3)
+CoberturaD23  = p(top2) + p(top3) = 1 - p(top1)
+CoberturaT123 = 1
+```
+
+Como:
+
+```text
+p(top1) >= p(top2) >= p(top3)
+```
+
+isoladamente:
+
+```text
+CoberturaD12 >= CoberturaD13 >= CoberturaD23
+```
+
+Isso não significa que D12 deva ser sempre preferido. A solução precisa fechar exatamente 11/8/6, 6S/5D/3T e maximizar o objetivo global.
+
+---
+
+# DoubleGain, RecoveryGain e TripleGain
+
+D12 e D13 preservam Top1 e acrescentam uma segunda marcação:
+
+```text
+DoubleGain(D12) = p(top2)
+DoubleGain(D13) = p(top3)
+```
+
+D23 abandona Top1 e troca por Top2+Top3:
+
+```text
+RecoveryGain(D23)
+= CoberturaD23 - p(top1)
+= 1 - 2*p(top1)
+```
+
+O triplo cobre os três resultados. Em comparação com um seco Top1:
+
+```text
+TripleGain(T123 vs S1)
+= 1 - p(top1)
+```
+
+Como o triplo consome duas marcações adicionais em relação a um seco, registrar também para auditoria:
+
+```text
+GainPerExtraMark(T123 vs S1)
+= (1 - p(top1)) / 2
+```
+
+Essa métrica é apenas diagnóstica. O objetivo principal continua sendo a maximização exata de `P(>=13)`.
 
 ---
 
@@ -73,100 +228,15 @@ Pontuação conceitual da preferência:
 0 = não exclui nenhuma
 ```
 
-Não adicionar bônus arbitrário diretamente a `P(>=13)`. A ordem correta é:
+Não adicionar bônus arbitrário diretamente a `P(>=13)`.
+
+A ordem correta é:
 
 ```text
 ótimo probabilístico
 -> faixa aceitável de quase ótimos
 -> preferência anti-Palmeiras/Vasco
 -> demais critérios de desempate
-```
-
-A tolerância deve ser validada historicamente. Se o ganho da preferência pessoal exigir perda probabilística acima do limite definido, prevalece a solução de maior qualidade global.
-
----
-
-# Estrutura 10-5-5
-
-Definir:
-
-```text
-D12 = Top1+Top2
-D13 = Top1+Top3
-D23 = Top2+Top3
-D12 + D13 + D23 = 6
-```
-
-Os secos por rank são:
-
-```text
-SecoTop1 = 10 - D12 - D13
-SecoTop2 = 5  - D12 - D23
-SecoTop3 = 5  - D13 - D23
-```
-
-Uma baseline estrutural válida é:
-
-```text
-8 secos Top1
-4 D23
-1 D12
-1 D13
-```
-
-Ela produz exatamente 10 Top1, 5 Top2 e 5 Top3. Essa composição é apenas referência de pesquisa, não regra obrigatória.
-
----
-
-# Cobertura dos duplos
-
-```text
-CoberturaD12 = p(top1) + p(top2)
-CoberturaD13 = p(top1) + p(top3)
-CoberturaD23 = p(top2) + p(top3) = 1 - p(top1)
-```
-
-Como `p(top1) >= p(top2) >= p(top3)`, isoladamente:
-
-```text
-CoberturaD12 >= CoberturaD13 >= CoberturaD23
-```
-
-A escolha final, porém, é global e deve fechar exatamente 10/5/5.
-
----
-
-# DoubleGain e RecoveryGain
-
-D12 e D13 preservam Top1 e acrescentam uma segunda marcação:
-
-```text
-DoubleGain(D12) = p(top2)
-DoubleGain(D13) = p(top3)
-```
-
-D23 é diferente: ele abandona Top1 e troca por Top2+Top3. Portanto:
-
-```text
-RecoveryGain(D23)
-= CoberturaD23 - p(top1)
-= 1 - 2*p(top1)
-```
-
-Não tratar D23 como `DoubleGain`.
-
-Telemetria por jogo:
-
-```text
-p(top1)
-p(top2)
-p(top3)
-CoberturaD12
-CoberturaD13
-CoberturaD23
-tipo escolhido
-DoubleGain, se D12/D13
-RecoveryGain, se D23
 ```
 
 ---
@@ -200,12 +270,125 @@ lift_shrunk
 Métricas relevantes:
 
 ```text
-RiskRankPrecision@6
-RiskRankRecall@6
-RiskRankNDCG@6
+RiskRankPrecision@8
+RiskRankRecall@8
+RiskRankNDCG@8
 RiskRankECE
 Brier por risk_rank
 ```
+
+`risk_rank` é um sinal de risco e não uma regra automática para definir os 5 duplos ou 3 triplos.
+
+---
+
+# Seleção dos triplos
+
+Os três triplos devem ser escolhidos globalmente pelo otimizador.
+
+Não assumir automaticamente:
+
+```text
+triplos = três menores p(top1)
+```
+
+ou:
+
+```text
+triplos = risk_rank 1, 2 e 3
+```
+
+A restrição 11-8-6 cria compensações entre Top1, Top2 e Top3. Portanto, a melhor localização dos triplos pode depender da composição simultânea de secos e duplos.
+
+Para cada triplo selecionado, registrar:
+
+```text
+Jogo
+risk_rank
+p(top1)
+p(top2)
+p(top3)
+entropia
+gap12
+gap13
+cobertura anterior alternativa
+TripleGain
+GainPerExtraMark
+DeltaP13plus de substituição
+```
+
+---
+
+# Otimização direta
+
+Para cada jogo:
+
+```text
+seco:   c_i = p(resultado selecionado)
+duplo:  c_i = p(resultado A) + p(resultado B)
+triplo: c_i = 1
+```
+
+Obter a distribuição exata de acertos por convolução dinâmica e otimizar diretamente:
+
+```text
+P(>=13) = P(13) + P(14)
+```
+
+O estado estrutural da programação dinâmica deve controlar:
+
+```text
+Top1 selecionados
+Top2 selecionados
+Top3 selecionados
+número de duplos
+número de triplos
+```
+
+Estado terminal esperado:
+
+```text
+(Top1, Top2, Top3, duplos, triplos)
+= (11, 8, 6, 5, 3)
+```
+
+A quantidade de secos é derivada:
+
+```text
+secos = 14 - duplos - triplos = 6
+```
+
+A solução final deve satisfazer:
+
+```text
+6 secos
+5 duplos
+3 triplos
+11 Top1
+8 Top2
+6 Top3
+25 marcações
+regra obrigatória do Flamengo
+```
+
+---
+
+# Distribuição exata de acertos
+
+Para cada jogo, usar a probabilidade coberta pela decisão escolhida.
+
+A distribuição de 0 a 14 acertos deve ser calculada por convolução dinâmica, evitando ruído de Monte Carlo.
+
+Reportar:
+
+```text
+P(14)
+P(13)
+P(>=13)
+P(12)
+P(>=12)
+```
+
+A probabilidade reportada pelo otimizador deve ser confirmada por cálculo independente da distribuição final.
 
 ---
 
@@ -235,13 +418,14 @@ DecisionNetGain
 DecisionWinRate
 RecoveryRate
 DoubleWasteRate
+TripleUsefulnessRate
 ```
 
 O ganho estimado de `P(>=13)` pelo próprio modelo não prova ganho real.
 
 ---
 
-# Backtest por composição D12/D13/D23
+# Backtest por composição estrutural
 
 Registrar por concurso:
 
@@ -249,6 +433,10 @@ Registrar por concurso:
 D12
 D13
 D23
+T123
+SecoTop1
+SecoTop2
+SecoTop3
 hits
 14
 13+
@@ -256,12 +444,13 @@ hits
 P13_estimado
 DoubleWaste
 RecoverySuccess
+TripleUseful
 ```
 
 Consolidar por composição:
 
 ```text
-D12 D13 D23 | concursos | 14 | 13+ | 12+ | mean_hits
+D12 D13 D23 T123 | concursos | 14 | 13+ | 12+ | mean_hits
 ```
 
 Também reportar:
@@ -271,6 +460,7 @@ Net13Gain
 DecisionNetGain
 RecoveryRate
 DoubleWasteRate
+TripleUsefulnessRate
 ```
 
 Não promover uma composição fixa apenas porque ela aparece com frequência no otimizador.
@@ -294,13 +484,13 @@ Sinais instáveis devem sofrer shrinkage ou permanecer apenas como diagnóstico.
 
 # Ablation estrutural
 
-Comparar:
+Comparar pelo menos:
 
 ```text
-A = otimizador livre atual
-B = composição fixa 4 D23 + 1 D12 + 1 D13
-C = composição aprendida historicamente
-D = composição dinâmica por risk_rank + gaps + entropia
+A = otimizador livre 6S-5D-3T / 11-8-6
+B = triplos nos três maiores riscos + duplos otimizados
+C = composição D12/D13/D23 aprendida historicamente
+D = estrutura dinâmica por risk_rank + gaps + entropia
 ```
 
 Critério principal:
@@ -310,6 +500,15 @@ Critério principal:
 Net13Gain
 ```
 
+Critérios auxiliares:
+
+```text
+>=12
+mean_hits
+DecisionNetGain
+DecisionWinRate
+```
+
 ---
 
 # StructuralCost
@@ -317,18 +516,18 @@ Net13Gain
 Medir apenas para auditoria:
 
 ```text
-P13plus_relaxado = melhor P(>=13) com 8 secos e 6 duplos sem impor 10/5/5
-P13plus_10_5_5  = melhor P(>=13) respeitando 10/5/5
-StructuralCost  = P13plus_relaxado - P13plus_10_5_5
+P13plus_relaxado = melhor P(>=13) com 6 secos, 5 duplos e 3 triplos sem impor 11/8/6
+P13plus_11_8_6  = melhor P(>=13) respeitando 11/8/6
+StructuralCost  = P13plus_relaxado - P13plus_11_8_6
 ```
 
 `StructuralCost` nunca autoriza relaxar Hard Constraints.
 
 ---
 
-# Auditoria estrutural dos 6 duplos
+# Auditoria estrutural dos duplos e triplos
 
-A análise baseada exclusivamente na fronteira 6º/7º por `1-p(top1)` é insuficiente quando existem D12 e D13.
+Não limitar a auditoria à fronteira simples por `1-p(top1)`.
 
 Usar como auditoria principal:
 
@@ -340,7 +539,8 @@ p(top2)
 p(top3)
 Tipo
 Cobertura
-DoubleGain ou RecoveryGain
+DoubleGain / RecoveryGain / TripleGain
+GainPerExtraMark
 DeltaP13plus de substituição
 ```
 
@@ -350,11 +550,11 @@ A fronteira por `risk_rank` pode permanecer como diagnóstico secundário.
 
 # Matriz de substituições globais
 
-Para cada duplo selecionado:
+Para cada decisão não-seca selecionada:
 
 1. remover temporariamente a decisão;
-2. testar outro jogo/tipo de duplo;
-3. reconstruir solução global válida 10/5/5;
+2. testar outra localização e/ou outro tipo estrutural;
+3. reconstruir uma solução global válida 11/8/6 e 6S/5D/3T;
 4. recalcular exatamente `P(>=13)`;
 5. medir:
 
@@ -362,10 +562,10 @@ Para cada duplo selecionado:
 DeltaP13plus = P13plus_alternativo - P13plus_original
 ```
 
-Telemetria:
+Telemetria sugerida:
 
 ```text
-DuploOriginal
+JogoOriginal
 JogoSubstituto
 TipoOriginal
 TipoSubstituto
@@ -374,17 +574,19 @@ P13plus_alternativo
 DeltaP13plus
 ```
 
+A troca deve preservar todas as Hard Constraints.
+
 ---
 
-# Explicação de secos inesperados
+# Explicação de decisões inesperadas
 
-Quando um jogo de `risk_rank` baixo permanecer seco enquanto outro de rank posterior receber duplo, emitir diagnóstico estrutural.
+Quando um jogo de alto risco permanecer seco enquanto outro de risco menor receber duplo ou triplo, emitir diagnóstico estrutural.
 
 Exemplo:
 
 ```text
-Jogo A permaneceu seco porque promovê-lo a duplo exigiria
-compensação estrutural que reduziria P(>=13) em X.
+Jogo A permaneceu seco porque promovê-lo a triplo exigiria
+compensações na distribuição 11/8/6 que reduziriam P(>=13) em X.
 ```
 
 Sempre que possível, quantificar com `DeltaP13plus`.
@@ -438,7 +640,7 @@ Top2Recall_when_Top1Fails
 Top3Recall_when_Top1Fails
 ```
 
-A aplicação inicial preferencial é orientar D12/D13/D23, sem substituir probabilidades base sem validação.
+A aplicação inicial preferencial é orientar D12/D13/D23 e a necessidade de T123, sem substituir probabilidades base sem validação.
 
 ---
 
@@ -480,37 +682,7 @@ Uma mudança só deve ser promovida quando:
 7. não houver evidência de sobreajuste
 ```
 
-Log-loss, Brier, ECE, `mean_hits` e métricas condicionais são evidências auxiliares.
-
----
-
-# Otimização direta
-
-Para cada jogo:
-
-```text
-seco:  c_i = p(resultado selecionado)
-duplo: c_i = p(resultado A) + p(resultado B)
-```
-
-Obter a distribuição exata de acertos por convolução dinâmica e otimizar diretamente:
-
-```text
-P(>=13) = P(13) + P(14)
-```
-
-A solução final deve satisfazer:
-
-```text
-8 secos
-6 duplos
-0 triplos
-10 Top1
-5 Top2
-5 Top3
-20 marcações
-regra obrigatória do Flamengo
-```
+Log-loss, Brier, ECE, `mean_hits`, métricas condicionais e métricas de uso dos triplos são evidências auxiliares.
 
 ---
 
@@ -520,13 +692,13 @@ Após a otimização, validar novamente:
 
 ```text
 jogos = 14
-secos = 8
-duplos = 6
-triplos = 0
-Top1 = 10
-Top2 = 5
-Top3 = 5
-marcações = 20
+secos = 6
+duplos = 5
+triplos = 3
+Top1 = 11
+Top2 = 8
+Top3 = 6
+marcações = 25
 Flamengo = regra satisfeita, quando aplicável
 ```
 
@@ -557,24 +729,27 @@ ranking_mudou
 CoberturaD12
 CoberturaD13
 CoberturaD23
-seco / duplo
+CoberturaT123
+seco / duplo / triplo
 palpite
 ranks selecionados
 probabilidade coberta
-DoubleGain ou RecoveryGain
+DoubleGain / RecoveryGain / TripleGain
+GainPerExtraMark
 ```
 
 Resumo:
 
 ```text
-Secos: 8/8
-Duplos: 6/6
-Triplos: 0/0
-Top1: 10/10
-Top2: 5/5
-Top3: 5/5
-Marcações: 20/20
+Secos: 6/6
+Duplos: 5/5
+Triplos: 3/3
+Top1: 11/11
+Top2: 8/8
+Top3: 6/6
+Marcações: 25/25
 Composição D12/D13/D23
+Triplos: 3
 Flamengo: regra satisfeita
 ```
 
@@ -590,9 +765,29 @@ P(>=12)
 
 ---
 
+# Estado atual de implementação
+
+Este repositório está sendo migrado da estrutura anterior **8S-6D-0T / 10-5-5** para a nova estrutura **6S-5D-3T / 11-8-6**.
+
+O README define a especificação-alvo do projeto. Durante a migração, código, testes e telemetria devem ser atualizados para obedecer integralmente às Hard Constraints descritas neste documento.
+
+Prioridades de implementação:
+
+```text
+1. adicionar T123 às opções do otimizador
+2. alterar o estado da DP para controlar duplos e triplos
+3. trocar o estado terminal para 11/8/6 + 5 duplos + 3 triplos
+4. atualizar validate_ticket()
+5. atualizar telemetria e auditorias estruturais
+6. adaptar testes
+7. executar backtest walk-forward Champion/Challenger
+```
+
+---
+
 # Princípio geral
 
-O projeto procura construir **um único bilhete de 14 jogos**, com exatamente **8 secos, 6 duplos, 0 triplos e distribuição 10-5-5**, cuja combinação de probabilidades, histórico e estrutura maximize:
+O projeto procura construir **um único bilhete de 14 jogos**, com exatamente **6 secos, 5 duplos, 3 triplos e distribuição 11-8-6**, cuja combinação de probabilidades, histórico e estrutura maximize:
 
 ```text
 P(acertos >= 13)
