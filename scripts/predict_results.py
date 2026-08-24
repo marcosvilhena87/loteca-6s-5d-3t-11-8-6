@@ -46,43 +46,85 @@ def _ticket_distribution(predictions: list[dict]) -> list[float]:
 
 
 def substitution_audit(predictions: list[dict]) -> list[dict]:
-    """Measure every valid non-dry/dry exchange with exact P(>=13).
+    """Measure every valid pairwise structural exchange exactly.
 
-    The exchanged games keep their selected rank sets.  Consequently the
-    11/8/6 totals and the structural composition are preserved while the
-    location of one double or triple changes. Invalid Flamengo exchanges are discarded
-    by the independent validator instead of being silently reported.
+    Swapping the complete rank decisions of two games covers both native
+    boundaries (triple/double and double/dry), as well as changes between rank
+    compositions such as D12/D23.  Counts, rank totals and markings remain
+    invariant by construction.  The independent validator still rejects a
+    swap that would remove Flamengo's mandatory victory.
     """
     validate_ticket(predictions)
-    original = sum(_ticket_distribution(predictions)[13:])
-    covered = [game for game in predictions if game["tipo"] != "seco"]
-    dry_games = [game for game in predictions if game["tipo"] == "seco"]
+    original_distribution = _ticket_distribution(predictions)
+    original_13 = sum(original_distribution[13:])
+    original_12 = sum(original_distribution[12:])
     audit = []
-    for selected in covered:
-        selected_ranks = tuple(int(rank[-1]) - 1 for rank in selected["ranks_selecionados"].split("+"))
-        for substitute in dry_games:
-            substitute_rank = int(substitute["ranks_selecionados"][-1]) - 1
+    for index, selected in enumerate(predictions):
+        selected_ranks = _selected_ranks(selected)
+        for substitute in predictions[index + 1:]:
+            substitute_ranks = _selected_ranks(substitute)
+            if selected_ranks == substitute_ranks:
+                continue
             alternative = [dict(game) for game in predictions]
             by_number = {int(game["Jogo"]): game for game in alternative}
-            demoted = by_number[int(selected["Jogo"])]
-            promoted = by_number[int(substitute["Jogo"])]
-            _set_selected_ranks(demoted, (substitute_rank,))
-            _set_selected_ranks(promoted, selected_ranks)
+            _set_selected_ranks(by_number[int(selected["Jogo"])], substitute_ranks)
+            _set_selected_ranks(by_number[int(substitute["Jogo"])], selected_ranks)
             try:
                 validate_ticket(alternative)
             except ValueError:
                 continue
-            probability = sum(_ticket_distribution(alternative)[13:])
-            audit.append({
-                "JogoOriginal": int(selected["Jogo"]),
-                "JogoSubstituto": int(substitute["Jogo"]),
-                "TipoOriginal": selected["tipo_estrutural"],
-                "TipoSubstituto": selected["tipo_estrutural"],
-                "P13plus_original": original,
-                "P13plus_alternativo": probability,
-                "DeltaP13plus": probability - original,
-            })
+            distribution = _ticket_distribution(alternative)
+            alternative_13 = sum(distribution[13:])
+            alternative_12 = sum(distribution[12:])
+            for source, target in ((selected, substitute), (substitute, selected)):
+                audit.append({
+                    "JogoOriginal": int(source["Jogo"]),
+                    "JogoSubstituto": int(target["Jogo"]),
+                    "DecisaoAtual": source["tipo_estrutural"],
+                    "Alternativa": target["tipo_estrutural"],
+                    "P13plus_original": original_13,
+                    "P13plus_alternativo": alternative_13,
+                    "DeltaP13plus": alternative_13 - original_13,
+                    "P12plus_original": original_12,
+                    "P12plus_alternativo": alternative_12,
+                    "DeltaP12plus": alternative_12 - original_12,
+                })
     return audit
+
+
+def _selected_ranks(game: dict) -> tuple[int, ...]:
+    return tuple(int(rank[-1]) - 1 for rank in game["ranks_selecionados"].split("+"))
+
+
+def add_structural_telemetry(predictions: list[dict]) -> list[dict]:
+    """Add marginal importance, confidence and structural rank per game."""
+    audit = substitution_audit(predictions)
+    best_by_game = {
+        game: max((item for item in audit if item["JogoOriginal"] == game),
+                  key=lambda item: item["P13plus_alternativo"])
+        for game in {int(item["Jogo"]) for item in predictions}
+    }
+    importance = {
+        game: item["P13plus_original"] - item["P13plus_alternativo"]
+        for game, item in best_by_game.items()
+    }
+    ranks = {
+        game: rank for rank, game in enumerate(
+            sorted(importance, key=lambda number: (-importance[number], number)), 1
+        )
+    }
+    for game in predictions:
+        number = int(game["Jogo"])
+        alternative = best_by_game[number]
+        game["StructuralImportance"] = importance[number]
+        game["ConfidenceMargin"] = importance[number]
+        game["structural_rank"] = ranks[number]
+        game["melhor_alternativa_valida"] = (
+            f"J{alternative['JogoSubstituto']}:{alternative['Alternativa']}"
+        )
+        game["DeltaP13plus_alternativa"] = alternative["DeltaP13plus"]
+        game["DeltaP12plus_alternativa"] = alternative["DeltaP12plus"]
+    return predictions
 
 
 def _set_selected_ranks(game: dict, ranks: tuple[int, ...]) -> None:
@@ -282,6 +324,7 @@ def optimize(
             "tolerancia_relativa_soft": soft_relative_tolerance,
         })
     validate_ticket(output)
+    add_structural_telemetry(output)
     return output, best.success
 
 
@@ -317,6 +360,9 @@ def print_telemetry(predictions: list[dict], success: float) -> None:
                         if game["tipo"] != "seco" else "")
         print(f"  {game['tipo']}: {game['palpite']} [{game['ranks_selecionados']}] "
               f"cobertura={game['probabilidade_coberta']:.4f}{double_audit}")
+        print(f"  structural_rank={game['structural_rank']} | importância/confiança="
+              f"{game['StructuralImportance']:.8%} | melhor alternativa: "
+              f"{game['melhor_alternativa_valida']}")
     dry = sum(game["tipo"] == "seco" for game in predictions)
     doubles = sum(game["tipo"] == "duplo" for game in predictions)
     triples = sum(game["tipo"] == "triplo" for game in predictions)
@@ -347,56 +393,15 @@ def print_telemetry(predictions: list[dict], success: float) -> None:
           f"perda relativa={predictions[0]['perda_relativa_soft']:.6%} | "
           f"tolerância={predictions[0]['tolerancia_relativa_soft']:.3%}")
     _print_substitution_audit(predictions)
-    _print_double_cutoff(predictions, exact_success)
 
 
 def _print_substitution_audit(predictions: list[dict]) -> None:
     """Print the best valid replacement for each selected double or triple."""
     audit = substitution_audit(predictions)
     print("\n=== MATRIZ DE SUBSTITUIÇÕES ESTRUTURAIS ===")
-    print("Original | Substituto | Tipo | P13+ original | P13+ alternativo | DeltaP13+")
+    print("Original | Substituto | Atual->Alternativa | DeltaP13+ | DeltaP12+")
     for game in sorted({item["JogoOriginal"] for item in audit}):
         best = max((item for item in audit if item["JogoOriginal"] == game), key=lambda item: item["DeltaP13plus"])
-        print(f"{game:>6} | {best['JogoSubstituto']:>10} | {best['TipoOriginal']:>4} | "
-              f"{best['P13plus_original']:.8%} | {best['P13plus_alternativo']:.8%} | "
-              f"{best['DeltaP13plus']:+.8%}")
-
-
-def _print_double_cutoff(predictions: list[dict], original_success: float) -> None:
-    """Keep a secondary diagnostic of the sixth/seventh Top1-risk boundary."""
-    ordered = sorted(predictions, key=lambda game: (-1.0 + game["p(top1)"], int(game["Jogo"])))
-    print("\n=== FRONTEIRA DO 6º VS 7º CANDIDATO A DUPLO ===")
-    print("Rank | Jogo | pTop1 | 1-pTop1 | Decisão")
-    for rank, game in enumerate(ordered, 1):
-        separator = "  <--- cutoff" if rank in (6, 7) else ""
-        print(f"{rank:>4} | {int(game['Jogo']):>4} | {game['p(top1)']:.4f} | {1-game['p(top1)']:.4f} | {game['tipo'].upper()}{separator}")
-
-    sixth, seventh = ordered[5], ordered[6]
-    exchangeable = (
-        sixth["ranks_selecionados"] == "top2+top3"
-        and seventh["ranks_selecionados"] == "top1"
-    )
-    if not exchangeable:
-        print("Troca direta não aplicável: as decisões globais no cutoff não são Top2+Top3 e Top1.")
-        return
-
-    swapped_coverages = []
-    for game in predictions:
-        if game is sixth:
-            swapped_coverages.append(game["p(top1)"])
-        elif game is seventh:
-            swapped_coverages.append(game["p(top2)"] + game["p(top3)"])
-        else:
-            swapped_coverages.append(game["probabilidade_coberta"])
-    swapped = sum(hit_distribution(swapped_coverages)[13:])
-    delta = swapped - original_success
-    relative = delta / original_success if original_success else 0.0
-    margin = abs(seventh["p(top1)"] - sixth["p(top1)"])
-    narrow = margin <= 0.01
-    material = abs(relative) > 0.01
-    print(f"P13+ original: {original_success:.8%}")
-    print(f"P13+ após trocar o 6º pelo 7º: {swapped:.8%}")
-    print(f"Delta absoluto: {delta:+.8%} | Delta relativo: {relative:+.4%}")
-    print(f"Margem pTop1: {margin:.4f}")
-    print(f"Fronteira probabilística: {'ESTREITA' if narrow else 'AMPLA'}")
-    print(f"Robustez no objetivo: {'MATERIAL' if material else 'IMATERIAL'}")
+        print(f"{game:>6} | {best['JogoSubstituto']:>10} | "
+              f"{best['DecisaoAtual']:>4}->{best['Alternativa']:<4} | "
+              f"{best['DeltaP13plus']:+.8%} | {best['DeltaP12plus']:+.8%}")

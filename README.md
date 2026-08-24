@@ -896,6 +896,8 @@ regra obrigatória do Flamengo
 DoubleGain / RecoveryGain / TripleGain
 GainPerExtraMark
 matriz de substituições
+fronteiras nativas Triplo<->Duplo e Duplo<->Seco
+StructuralImportance / ConfidenceMargin / structural_rank
 calibração por temperatura
 calibração e auditoria por risk_rank
 Soft Constraints anti-Palmeiras/Vasco
@@ -917,13 +919,9 @@ A antiga seção “fronteira do 6º vs 7º candidato a duplo” deve ser consid
 ## Prioridade 1 — auditoria estrutural nativa do 6S-5D-3T
 
 ```text
-1. remover/substituir a velha fronteira 6º vs 7º duplo
-2. implementar fronteiras Triplo<->Duplo e Duplo<->Seco
-3. criar matriz completa de promoções/rebaixamentos
-4. calcular StructuralImportance
-5. calcular ConfidenceMargin
-6. criar structural_rank
-7. gerar explicação automática para decisões inesperadas
+1. ampliar trocas pareadas para reconstrução global com decisão fixa/proibida
+2. gerar explicação automática para decisões inesperadas
+3. persistir a matriz estrutural completa em artefato próprio
 ```
 
 ## Prioridade 2 — provar o ganho da nova estrutura
