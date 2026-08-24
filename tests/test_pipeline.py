@@ -147,7 +147,19 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("StructuralClass", item)
             self.assertIn("BestAlternativeMargin", item)
             self.assertIn("SecondBestMargin", item)
+            self.assertAlmostEqual(
+                item["RelativeStructuralMargin"],
+                item["StructuralMargin"] / probability,
+            )
             self.assertGreaterEqual(item["SecondBestMargin"], item["BestAlternativeMargin"] - 1e-15)
+            self.assertAlmostEqual(
+                item["AlternativeGap"],
+                item["SecondBestMargin"] - item["StructuralMargin"],
+            )
+            self.assertAlmostEqual(
+                item["TicketRigidityIndex"],
+                sum(game["StructuralMargin"] for game in predictions) / 14,
+            )
             self.assertIn("melhor_alternativa_valida", item)
 
     def test_structural_margin_classes_use_percentage_point_bands(self):
@@ -174,6 +186,7 @@ class PipelineTests(unittest.TestCase):
                 persisted = list(csv.DictReader(stream, delimiter=";"))
         self.assertEqual(len(persisted), len(expected))
         self.assertTrue(all(row["Concurso"] == "9" for row in persisted))
+        self.assertTrue(all("DeltaP14" in row for row in persisted))
         self.assertEqual({int(row["JogoOriginal"]) for row in persisted}, set(range(1, 15)))
 
     def test_independent_validator_rejects_a_tampered_ticket(self):

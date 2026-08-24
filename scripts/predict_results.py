@@ -56,6 +56,7 @@ def substitution_audit(predictions: list[dict]) -> list[dict]:
     """
     validate_ticket(predictions)
     original_distribution = _ticket_distribution(predictions)
+    original_14 = original_distribution[14]
     original_13 = sum(original_distribution[13:])
     original_12 = sum(original_distribution[12:])
     audit = []
@@ -74,6 +75,7 @@ def substitution_audit(predictions: list[dict]) -> list[dict]:
             except ValueError:
                 continue
             distribution = _ticket_distribution(alternative)
+            alternative_14 = distribution[14]
             alternative_13 = sum(distribution[13:])
             alternative_12 = sum(distribution[12:])
             for source, target in ((selected, substitute), (substitute, selected)):
@@ -82,6 +84,9 @@ def substitution_audit(predictions: list[dict]) -> list[dict]:
                     "JogoSubstituto": int(target["Jogo"]),
                     "DecisaoAtual": source["tipo_estrutural"],
                     "Alternativa": target["tipo_estrutural"],
+                    "P14_original": original_14,
+                    "P14_alternativo": alternative_14,
+                    "DeltaP14": alternative_14 - original_14,
                     "P13plus_original": original_13,
                     "P13plus_alternativo": alternative_13,
                     "DeltaP13plus": alternative_13 - original_13,
@@ -121,15 +126,30 @@ def add_structural_telemetry(predictions: list[dict]) -> list[dict]:
         alternative = best_by_game[number]
         second = alternatives_by_game[number][1] if len(alternatives_by_game[number]) > 1 else alternative
         game["StructuralMargin"] = importance[number]
+        game["RelativeStructuralMargin"] = (
+            importance[number] / alternative["P13plus_original"]
+            if alternative["P13plus_original"] else 0.0
+        )
         game["StructuralClass"] = structural_margin_class(importance[number])
         game["BestAlternativeMargin"] = importance[number]
         game["SecondBestMargin"] = alternative["P13plus_original"] - second["P13plus_alternativo"]
+        game["AlternativeGap"] = game["SecondBestMargin"] - game["StructuralMargin"]
         game["structural_rank"] = ranks[number]
         game["melhor_alternativa_valida"] = (
             f"J{alternative['JogoSubstituto']}:{alternative['Alternativa']}"
         )
         game["DeltaP13plus_alternativa"] = alternative["DeltaP13plus"]
         game["DeltaP12plus_alternativa"] = alternative["DeltaP12plus"]
+    margins = sorted(importance.values())
+    mean = sum(margins) / len(margins)
+    median = (margins[len(margins) // 2 - 1] + margins[len(margins) // 2]) / 2
+    deviation = math.sqrt(sum((margin - mean) ** 2 for margin in margins) / len(margins))
+    for game in predictions:
+        game["TicketRigidityIndex"] = mean
+        game["StructuralMarginMedian"] = median
+        game["StructuralMarginMin"] = margins[0]
+        game["StructuralMarginMax"] = margins[-1]
+        game["StructuralMarginStdDev"] = deviation
     return predictions
 
 
@@ -156,6 +176,9 @@ def write_substitution_audit(predictions: list[dict], output_path: str | Path) -
         "DecisaoOriginal": row["DecisaoAtual"],
         "JogoSubstituto": row["JogoSubstituto"],
         "DecisaoAlternativa": row["Alternativa"],
+        "P14_original": row["P14_original"],
+        "P14_alternativo": row["P14_alternativo"],
+        "DeltaP14": row["DeltaP14"],
         "P13plus_original": row["P13plus_original"],
         "P13plus_alternativo": row["P13plus_alternativo"],
         "DeltaP13plus": row["DeltaP13plus"],
@@ -415,8 +438,10 @@ def print_telemetry(predictions: list[dict], success: float) -> None:
         print(f"  {game['tipo']}: {game['palpite']} [{game['ranks_selecionados']}] "
               f"cobertura={game['probabilidade_coberta']:.4f}{double_audit}")
         print(f"  structural_rank={game['structural_rank']} | StructuralMargin="
-              f"{game['StructuralMargin']:.8%} ({game['StructuralClass']}) | melhor alternativa: "
-              f"{game['melhor_alternativa_valida']} | SecondBestMargin={game['SecondBestMargin']:.8%}")
+              f"{game['StructuralMargin']:.8%} ({game['StructuralClass']}) | relativa="
+              f"{game['RelativeStructuralMargin']:.4%} | melhor alternativa: "
+              f"{game['melhor_alternativa_valida']} | SecondBestMargin={game['SecondBestMargin']:.8%} "
+              f"| AlternativeGap={game['AlternativeGap']:.8%}")
     dry = sum(game["tipo"] == "seco" for game in predictions)
     doubles = sum(game["tipo"] == "duplo" for game in predictions)
     triples = sum(game["tipo"] == "triplo" for game in predictions)
@@ -465,14 +490,43 @@ def _print_structural_summaries(predictions: list[dict], limit: int = 5) -> None
               f"{game['melhor_alternativa_valida']:>18} | {game['StructuralMargin']:.8%} | "
               f"{game['DeltaP12plus_alternativa']:+.8%}")
 
+    margins = [game["StructuralMargin"] for game in predictions]
+    classes = {
+        name: sum(game["StructuralClass"] == name for game in predictions)
+        for name in ("MARGINAL", "MODERADA", "FORTE", "MUITO FORTE")
+    }
+    print("\n=== PERFIL DE RIGIDEZ ===")
+    print(f"MARGINAL={classes['MARGINAL']} | MODERADA={classes['MODERADA']} | "
+          f"FORTE={classes['FORTE']} | MUITO FORTE={classes['MUITO FORTE']}")
+    print(f"TicketRigidityIndex={predictions[0]['TicketRigidityIndex']:.8%} | "
+          f"mediana={predictions[0]['StructuralMarginMedian']:.8%} | "
+          f"mínimo={predictions[0]['StructuralMarginMin']:.8%} | "
+          f"máximo={predictions[0]['StructuralMarginMax']:.8%} | "
+          f"desvio-padrão={predictions[0]['StructuralMarginStdDev']:.8%}")
+
+    highest_risk = min(predictions, key=lambda game: game["risk_rank"])
+    lowest_risk = max(predictions, key=lambda game: game["risk_rank"])
+    largest_divergence = max(
+        predictions,
+        key=lambda game: (abs(game["risk_rank"] - game["structural_rank"]), -int(game["Jogo"])),
+    )
+    print("\n=== DIVERGÊNCIAS RISCO X ESTRUTURA ===")
+    print(f"Maior risco: J{highest_risk['Jogo']} | risk_rank={highest_risk['risk_rank']} | "
+          f"structural_rank={highest_risk['structural_rank']}")
+    print(f"Menor risco: J{lowest_risk['Jogo']} | risk_rank={lowest_risk['risk_rank']} | "
+          f"structural_rank={lowest_risk['structural_rank']}")
+    print(f"Maior divergência: J{largest_divergence['Jogo']} | risk_rank={largest_divergence['risk_rank']} | "
+          f"structural_rank={largest_divergence['structural_rank']} | "
+          f"diferença={abs(largest_divergence['risk_rank'] - largest_divergence['structural_rank'])}")
+
 
 def _print_substitution_audit(predictions: list[dict]) -> None:
     """Print the best valid replacement for each selected double or triple."""
     audit = substitution_audit(predictions)
     print("\n=== MATRIZ DE SUBSTITUIÇÕES ESTRUTURAIS ===")
-    print("Original | Substituto | Atual->Alternativa | DeltaP13+ | DeltaP12+")
+    print("Original | Substituto | Atual->Alternativa | DeltaP14 | DeltaP13+ | DeltaP12+")
     for game in sorted({item["JogoOriginal"] for item in audit}):
         best = max((item for item in audit if item["JogoOriginal"] == game), key=lambda item: item["DeltaP13plus"])
         print(f"{game:>6} | {best['JogoSubstituto']:>10} | "
               f"{best['DecisaoAtual']:>4}->{best['Alternativa']:<4} | "
-              f"{best['DeltaP13plus']:+.8%} | {best['DeltaP12plus']:+.8%}")
+              f"{best['DeltaP14']:+.8%} | {best['DeltaP13plus']:+.8%} | {best['DeltaP12plus']:+.8%}")
