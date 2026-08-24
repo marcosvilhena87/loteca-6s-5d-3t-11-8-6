@@ -1,4 +1,4 @@
-"""Constrained optimization of a single 8-dry/6-double Loteca ticket."""
+"""Constrained optimization of a single 6-dry/5-double/3-triple ticket."""
 
 from __future__ import annotations
 
@@ -46,19 +46,19 @@ def _ticket_distribution(predictions: list[dict]) -> list[float]:
 
 
 def substitution_audit(predictions: list[dict]) -> list[dict]:
-    """Measure every valid double/dry exchange with exact P(>=13).
+    """Measure every valid non-dry/dry exchange with exact P(>=13).
 
     The exchanged games keep their selected rank sets.  Consequently the
-    10/5/5 totals and the D12/D13/D23 composition are preserved while the
-    location of one double changes.  Invalid Flamengo exchanges are discarded
+    11/8/6 totals and the structural composition are preserved while the
+    location of one double or triple changes. Invalid Flamengo exchanges are discarded
     by the independent validator instead of being silently reported.
     """
     validate_ticket(predictions)
     original = sum(_ticket_distribution(predictions)[13:])
-    doubles = [game for game in predictions if game["tipo"] == "duplo"]
+    covered = [game for game in predictions if game["tipo"] != "seco"]
     dry_games = [game for game in predictions if game["tipo"] == "seco"]
     audit = []
-    for selected in doubles:
+    for selected in covered:
         selected_ranks = tuple(int(rank[-1]) - 1 for rank in selected["ranks_selecionados"].split("+"))
         for substitute in dry_games:
             substitute_rank = int(substitute["ranks_selecionados"][-1]) - 1
@@ -74,10 +74,10 @@ def substitution_audit(predictions: list[dict]) -> list[dict]:
                 continue
             probability = sum(_ticket_distribution(alternative)[13:])
             audit.append({
-                "DuploOriginal": int(selected["Jogo"]),
+                "JogoOriginal": int(selected["Jogo"]),
                 "JogoSubstituto": int(substitute["Jogo"]),
-                "TipoOriginal": selected["tipo_duplo"],
-                "TipoSubstituto": f"D{selected_ranks[0] + 1}{selected_ranks[1] + 1}",
+                "TipoOriginal": selected["tipo_estrutural"],
+                "TipoSubstituto": selected["tipo_estrutural"],
                 "P13plus_original": original,
                 "P13plus_alternativo": probability,
                 "DeltaP13plus": probability - original,
@@ -90,8 +90,9 @@ def _set_selected_ranks(game: dict, ranks: tuple[int, ...]) -> None:
     selected = [game[f"top{rank + 1}"] for rank in ranks]
     game["palpite"] = "".join(result for result in RESULTS_ORDER if result in selected)
     game["ranks_selecionados"] = "+".join(f"top{rank + 1}" for rank in ranks)
-    game["tipo"] = "duplo" if len(ranks) == 2 else "seco"
+    game["tipo"] = {1: "seco", 2: "duplo", 3: "triplo"}[len(ranks)]
     game["tipo_duplo"] = f"D{ranks[0] + 1}{ranks[1] + 1}" if len(ranks) == 2 else "-"
+    game["tipo_estrutural"] = game["tipo_duplo"] if len(ranks) == 2 else ("T123" if len(ranks) == 3 else f"S{ranks[0] + 1}")
     game["probabilidade_coberta"] = sum(game[f"p(top{rank + 1})"] for rank in ranks)
 
 
@@ -104,13 +105,13 @@ def validate_ticket(predictions: list[dict]) -> None:
         raise ValueError(f"A aposta deve ter 14 jogos; recebeu {len(predictions)}")
     dry = sum(game["tipo"] == "seco" for game in predictions)
     doubles = sum(game["tipo"] == "duplo" for game in predictions)
-    triples = sum(len(game["palpite"]) == 3 for game in predictions)
+    triples = sum(game["tipo"] == "triplo" for game in predictions)
     rank_counts = [
         sum(f"top{rank}" in game["ranks_selecionados"].split("+") for game in predictions)
         for rank in range(1, 4)
     ]
     markings = sum(len(game["palpite"]) for game in predictions)
-    if (dry, doubles, triples, *rank_counts, markings) != (8, 6, 0, 10, 5, 5, 20):
+    if (dry, doubles, triples, *rank_counts, markings) != (6, 5, 3, 11, 8, 6, 25):
         raise ValueError(
             "Hard Constraints violadas: "
             f"secos={dry}, duplos={doubles}, triplos={triples}, "
@@ -156,7 +157,7 @@ def _avoided_team_mask(row: dict[str, str], ranking: tuple[str, str, str], optio
 
 
 def _allowed_options(row: dict[str, str], ranking: tuple[str, str, str]) -> list[tuple[int, ...]]:
-    options = [(0,), (1,), (2,), (0, 1), (0, 2), (1, 2)]
+    options = [(0,), (1,), (2,), (0, 1), (0, 2), (1, 2), (0, 1, 2)]
     home, away = normalized_team(row["Mandante"]), normalized_team(row["Visitante"])
     if "FLAMENGO/RJ" in (home, away):
         victory = "1" if home == "FLAMENGO/RJ" else "2"
@@ -191,14 +192,17 @@ def optimize(
         ranking = rank_results(probs)
         games.append((row, probs, ranking, _allowed_options(row, ranking), risk_rank, base_probs, base_ranking))
 
-    # State: number of selected rank-1/rank-2/rank-3 outcomes and doubles.
-    states: dict[tuple[int, int, int, int], list[Candidate]] = {(0, 0, 0, 0): [Candidate(1.0, 0.0, ())]}
+    # State: selected rank-1/rank-2/rank-3 outcomes, doubles and triples.
+    states: dict[tuple[int, int, int, int, int], list[Candidate]] = {(0, 0, 0, 0, 0): [Candidate(1.0, 0.0, ())]}
     for row, probs, ranking, options, _, _, _ in games:
-        expanded: dict[tuple[int, int, int, int], list[Candidate]] = {}
+        expanded: dict[tuple[int, int, int, int, int], list[Candidate]] = {}
         for counts, frontier in states.items():
             for option in options:
-                new_counts = tuple(counts[index] + (index in option) for index in range(3)) + (counts[3] + (len(option) == 2),)
-                if any(new_counts[index] > (10, 5, 5)[index] for index in range(3)) or new_counts[3] > 6:
+                new_counts = tuple(counts[index] + (index in option) for index in range(3)) + (
+                    counts[3] + (len(option) == 2), counts[4] + (len(option) == 3)
+                )
+                if (any(new_counts[index] > (11, 8, 6)[index] for index in range(3))
+                        or new_counts[3] > 5 or new_counts[4] > 3):
                     continue
                 coverage = sum(probs[ranking[index]] for index in option)
                 bucket = expanded.setdefault(new_counts, [])
@@ -211,7 +215,7 @@ def optimize(
                     ))
         states = {state: _pareto(frontier) for state, frontier in expanded.items()}
 
-    finalists = states.get((10, 5, 5, 6), [])
+    finalists = states.get((11, 8, 6, 5, 3), [])
     if not finalists:
         raise RuntimeError("Não existe aposta que satisfaça todas as Hard Constraints")
 
@@ -245,8 +249,11 @@ def optimize(
         selected = [ranking[index] for index in choice]
         ordered_marks = "".join(result for result in ("1", "X", "2") if result in selected)
         double_kind = f"D{choice[0] + 1}{choice[1] + 1}" if len(choice) == 2 else "-"
-        gain = sum(probs[ranking[index]] for index in choice) - probs[ranking[0]] if len(choice) == 2 else 0.0
-        gain_kind = "RecoveryGain" if choice == (1, 2) else ("DoubleGain" if len(choice) == 2 else "-")
+        kind = {1: "seco", 2: "duplo", 3: "triplo"}[len(choice)]
+        structural_kind = double_kind if len(choice) == 2 else ("T123" if len(choice) == 3 else f"S{choice[0] + 1}")
+        gain = sum(probs[ranking[index]] for index in choice) - probs[ranking[0]] if len(choice) > 1 else 0.0
+        gain_kind = ("TripleGain" if len(choice) == 3 else
+                     "RecoveryGain" if choice == (1, 2) else "DoubleGain" if len(choice) == 2 else "-")
         output.append({
             "Concurso": row["Concurso"], "Jogo": row["Jogo"], "Mandante": row["Mandante"], "Visitante": row["Visitante"],
             "p(1)": probs["1"], "p(X)": probs["X"], "p(2)": probs["2"],
@@ -258,12 +265,16 @@ def optimize(
             "CoberturaD12": probs[ranking[0]] + probs[ranking[1]],
             "CoberturaD13": probs[ranking[0]] + probs[ranking[2]],
             "CoberturaD23": probs[ranking[1]] + probs[ranking[2]],
+            "CoberturaT123": 1.0,
             "risk_rank": risk_rank,
             "pTop1_base": base_probs[base_ranking[0]], "pTop1_ajustado": probs[ranking[0]],
             "delta_pTop1": probs[ranking[0]] - base_probs[base_ranking[0]],
             "top1_base": base_ranking[0], "ranking_mudou": base_ranking != ranking,
-            "tipo": "duplo" if len(choice) == 2 else "seco", "tipo_duplo": double_kind,
-            "double_gain": gain, "gain_kind": gain_kind, "palpite": ordered_marks,
+            "tipo": kind, "tipo_duplo": double_kind, "tipo_estrutural": structural_kind,
+            "double_gain": gain if len(choice) == 2 else 0.0,
+            "structural_gain": gain, "gain_kind": gain_kind,
+            "gain_per_extra_mark": gain / (len(choice) - 1) if len(choice) > 1 else 0.0,
+            "palpite": ordered_marks,
             "ranks_selecionados": "+".join(f"top{index + 1}" for index in choice),
             "probabilidade_coberta": sum(probs[result] for result in selected),
             "P13plus_otimo": best_probability,
@@ -297,23 +308,25 @@ def print_telemetry(predictions: list[dict], success: float) -> None:
         print(f"  ranking: {game['top1']} ({game['p(top1)']:.4f}) > {game['top2']} ({game['p(top2)']:.4f}) > {game['top3']} ({game['p(top3)']:.4f})")
         print(f"  gap12={game['gap12']:.4f} gap13={game['gap13']:.4f} entropia={game['entropy']:.4f} risk_rank={game['risk_rank']}")
         print(f"  coberturas: D12={game['CoberturaD12']:.4f} D13={game['CoberturaD13']:.4f} "
-              f"D23={game['CoberturaD23']:.4f}")
+              f"D23={game['CoberturaD23']:.4f} T123={game['CoberturaT123']:.4f}")
         print(f"  risk audit: pTop1 {game['pTop1_base']:.4f} -> {game['pTop1_ajustado']:.4f} "
               f"({game['delta_pTop1']:+.4f}); top1 {game['top1_base']} -> {game['top1']} "
               f"| ranking mudou: {'SIM' if game['ranking_mudou'] else 'NÃO'}")
-        double_audit = (f" | {game['tipo_duplo']} {game['gain_kind']}={game['double_gain']:+.4f}"
-                        if game["tipo"] == "duplo" else "")
+        double_audit = (f" | {game['tipo_estrutural']} {game['gain_kind']}={game['structural_gain']:+.4f} "
+                        f"por marca extra={game['gain_per_extra_mark']:+.4f}"
+                        if game["tipo"] != "seco" else "")
         print(f"  {game['tipo']}: {game['palpite']} [{game['ranks_selecionados']}] "
               f"cobertura={game['probabilidade_coberta']:.4f}{double_audit}")
     dry = sum(game["tipo"] == "seco" for game in predictions)
     doubles = sum(game["tipo"] == "duplo" for game in predictions)
+    triples = sum(game["tipo"] == "triplo" for game in predictions)
     rank_counts = [sum(f"top{rank}" in game["ranks_selecionados"].split("+") for game in predictions) for rank in range(1, 4)]
     flamengo_games = [game for game in predictions if "FLAMENGO/RJ" in (normalized_team(game["Mandante"]), normalized_team(game["Visitante"]))]
     flamengo_ok = all(("1" if normalized_team(game["Mandante"]) == "FLAMENGO/RJ" else "2") in game["palpite"] for game in flamengo_games)
     print("\n=== VALIDAÇÃO DAS HARD CONSTRAINTS ===")
-    print(f"Secos: {dry}/8 | Duplos: {doubles}/6 | Triplos: 0/0")
-    print(f"Top1: {rank_counts[0]}/10 | Top2: {rank_counts[1]}/5 | Top3: {rank_counts[2]}/5")
-    print(f"Total de marcações: {sum(len(game['palpite']) for game in predictions)}/20")
+    print(f"Secos: {dry}/6 | Duplos: {doubles}/5 | Triplos: {triples}/3")
+    print(f"Top1: {rank_counts[0]}/11 | Top2: {rank_counts[1]}/8 | Top3: {rank_counts[2]}/6")
+    print(f"Total de marcações: {sum(len(game['palpite']) for game in predictions)}/25")
     print(f"Flamengo/RJ: {'regra satisfeita' if flamengo_ok else 'REGRA VIOLADA'}")
     composition = {
         kind: sum(game["tipo_duplo"] == kind for game in predictions)
@@ -338,19 +351,19 @@ def print_telemetry(predictions: list[dict], success: float) -> None:
 
 
 def _print_substitution_audit(predictions: list[dict]) -> None:
-    """Print the best valid replacement for each selected double."""
+    """Print the best valid replacement for each selected double or triple."""
     audit = substitution_audit(predictions)
     print("\n=== MATRIZ DE SUBSTITUIÇÕES ESTRUTURAIS ===")
-    print("Duplo | Substituto | Tipo | P13+ original | P13+ alternativo | DeltaP13+")
-    for game in sorted({item["DuploOriginal"] for item in audit}):
-        best = max((item for item in audit if item["DuploOriginal"] == game), key=lambda item: item["DeltaP13plus"])
+    print("Original | Substituto | Tipo | P13+ original | P13+ alternativo | DeltaP13+")
+    for game in sorted({item["JogoOriginal"] for item in audit}):
+        best = max((item for item in audit if item["JogoOriginal"] == game), key=lambda item: item["DeltaP13plus"])
         print(f"{game:>6} | {best['JogoSubstituto']:>10} | {best['TipoOriginal']:>4} | "
               f"{best['P13plus_original']:.8%} | {best['P13plus_alternativo']:.8%} | "
               f"{best['DeltaP13plus']:+.8%}")
 
 
 def _print_double_cutoff(predictions: list[dict], original_success: float) -> None:
-    """Audit the sixth/seventh Top1-risk boundary and its concrete P13+ cost."""
+    """Keep a secondary diagnostic of the sixth/seventh Top1-risk boundary."""
     ordered = sorted(predictions, key=lambda game: (-1.0 + game["p(top1)"], int(game["Jogo"])))
     print("\n=== FRONTEIRA DO 6º VS 7º CANDIDATO A DUPLO ===")
     print("Rank | Jogo | pTop1 | 1-pTop1 | Decisão")

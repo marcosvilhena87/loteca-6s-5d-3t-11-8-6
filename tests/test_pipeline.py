@@ -97,9 +97,11 @@ class PipelineTests(unittest.TestCase):
             })
         predictions, probability = optimize(rows, 1.0)
         self.assertGreater(probability, 0)
-        self.assertEqual(sum(item["tipo"] == "seco" for item in predictions), 8)
-        self.assertEqual(sum(item["tipo"] == "duplo" for item in predictions), 6)
-        for rank, expected in ((1, 10), (2, 5), (3, 5)):
+        self.assertEqual(sum(item["tipo"] == "seco" for item in predictions), 6)
+        self.assertEqual(sum(item["tipo"] == "duplo" for item in predictions), 5)
+        self.assertEqual(sum(item["tipo"] == "triplo" for item in predictions), 3)
+        self.assertEqual(sum(len(item["palpite"]) for item in predictions), 25)
+        for rank, expected in ((1, 11), (2, 8), (3, 6)):
             self.assertEqual(sum(f"top{rank}" in item["ranks_selecionados"].split("+") for item in predictions), expected)
         self.assertIn("1", predictions[0]["palpite"])
         self.assertNotIn("1", predictions[1]["palpite"])
@@ -108,25 +110,29 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("ranking_mudou", predictions[0])
         self.assertAlmostEqual(predictions[0]["P13plus_otimo"], probability)
         self.assertLessEqual(predictions[0]["perda_relativa_soft"], 0.005)
-        self.assertEqual(sum(item["tipo_duplo"] == "D12" for item in predictions), 1)
-        self.assertEqual(sum(item["tipo_duplo"] == "D13" for item in predictions), 1)
-        self.assertEqual(sum(item["tipo_duplo"] == "D23" for item in predictions), 4)
+        self.assertEqual(sum(item["tipo_duplo"] != "-" for item in predictions), 5)
         for item in predictions:
             self.assertAlmostEqual(item["CoberturaD12"], item["p(top1)"] + item["p(top2)"])
             self.assertAlmostEqual(item["CoberturaD13"], item["p(top1)"] + item["p(top3)"])
             self.assertAlmostEqual(item["CoberturaD23"], item["p(top2)"] + item["p(top3)"])
+            self.assertEqual(item["CoberturaT123"], 1.0)
             if item["tipo"] == "duplo":
                 self.assertAlmostEqual(item["double_gain"], item["probabilidade_coberta"] - item["p(top1)"])
                 expected_kind = "RecoveryGain" if item["tipo_duplo"] == "D23" else "DoubleGain"
                 self.assertEqual(item["gain_kind"], expected_kind)
+            elif item["tipo"] == "triplo":
+                self.assertEqual(item["tipo_estrutural"], "T123")
+                self.assertEqual(item["gain_kind"], "TripleGain")
+                self.assertAlmostEqual(item["probabilidade_coberta"], 1.0)
+                self.assertAlmostEqual(item["gain_per_extra_mark"], (1 - item["p(top1)"]) / 2)
         distribution = hit_distribution([item["probabilidade_coberta"] for item in predictions])
         self.assertAlmostEqual(probability, sum(distribution[13:]))
 
         audit = substitution_audit(predictions)
         self.assertTrue(audit)
         self.assertTrue(all(item["DeltaP13plus"] <= 1e-12 for item in audit))
-        self.assertEqual({item["DuploOriginal"] for item in audit},
-                         {int(item["Jogo"]) for item in predictions if item["tipo"] == "duplo"})
+        self.assertEqual({item["JogoOriginal"] for item in audit},
+                         {int(item["Jogo"]) for item in predictions if item["tipo"] != "seco"})
 
     def test_independent_validator_rejects_a_tampered_ticket(self):
         rows = []
