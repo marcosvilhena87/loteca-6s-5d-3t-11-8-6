@@ -1016,6 +1016,9 @@ DoubleGain / RecoveryGain / TripleGain
 GainPerExtraMark
 matriz de substituições estruturais
 structural_rank
+StructuralMargin classificado e SecondBestMargin
+persistência da matriz completa em `output/predictions_substitutions.csv`
+resumos de núcleo estrutural e zona marginal
 calibração por temperatura
 calibração e auditoria por risk_rank
 Soft Constraints anti-Palmeiras/Vasco
@@ -1039,14 +1042,14 @@ A calibração de `risk_rank` apresentou melhora probabilística e leve melhora 
 
 # Roadmap priorizado
 
-## Prioridade 1 — consolidar auditoria estrutural
+## Prioridade 1 — consolidar auditoria estrutural (concluída)
 
 ```text
-1. renomear importância/confiança para StructuralMargin
-2. classificar MARGINAL / MODERADA / FORTE / MUITO FORTE
-3. persistir matriz completa de substituições em CSV
-4. registrar BestAlternativeMargin e SecondBestMargin
-5. imprimir núcleo estrutural e zona marginal
+1. [x] renomear importância/confiança para StructuralMargin
+2. [x] classificar MARGINAL / MODERADA / FORTE / MUITO FORTE
+3. [x] persistir matriz completa de substituições em CSV
+4. [x] registrar BestAlternativeMargin e SecondBestMargin
+5. [x] imprimir núcleo estrutural e zona marginal
 ```
 
 ## Prioridade 2 — validar StructuralMargin fora da amostra
